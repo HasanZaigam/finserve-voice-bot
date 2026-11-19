@@ -94,6 +94,18 @@ export async function POST(req: Request) {
     );
     const extracted = (toolUse?.input ?? {}) as Extracted;
 
+    // Don't rely on the model for yes/no after a read-back: detect it in code.
+    if (prevState.pending.length && !extracted.confirmation) {
+      const last = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
+      const t = last.toLowerCase().trim();
+      const negative = /\b(no|nope|nah|wrong|incorrect|not correct|not right|galat|nahi|nahin)\b/.test(t);
+      const positive = /\b(yes|yeah|yep|yup|correct|right|exactly|perfect|sure|ok|okay|confirm(ed)?|haan|han|ha|ji|theek|sahi)\b/.test(t);
+      const newContact = prevState.pending.some((p) => extracted[p.field]);
+      const movedOn = Boolean(extracted.purpose || extracted.details || extracted.date || extracted.time);
+      if (negative && !newContact) extracted.confirmation = "no";
+      else if (positive || (movedOn && !newContact)) extracted.confirmation = "yes";
+    }
+
     // 2) Validate in code and merge into state.
     const { state, errors, notes } = mergeExtracted(prevState, extracted);
 
