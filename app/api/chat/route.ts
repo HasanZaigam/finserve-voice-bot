@@ -3,32 +3,47 @@ import { NextResponse } from "next/server";
 import { extractSystem, replySystem, SUMMARY_SYSTEM } from "../../../lib/prompt";
 import {
   BotState,
+  describeStep,
   emptyState,
   Extracted,
+  fallbackQuestion,
   mergeExtracted,
-  missingFields,
+  nextSteps,
   nowISTLabel,
+  PURPOSE_LABEL,
+  PURPOSES,
+  prettyTime,
 } from "../../../lib/state";
+import {
+  calendarConfigured,
+  createCallbackEvent,
+  freeSlots,
+  isSlotFree,
+  nearest,
+  speakSlots,
+} from "../../../lib/calendar";
+
+export const maxDuration = 30;
 
 const client = new Anthropic(); // reads ANTHROPIC_API_KEY
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-haiku-5-5";
+// Thinking off: on newer models reasoning shares the output budget and can
+// leave the visible reply empty or cut off mid-sentence.
+const NO_THINKING = { thinking: { type: "disabled" as const } };
 
 type Msg = { role: "user" | "assistant"; content: string };
 
 const extractTool: Anthropic.Tool = {
   name: "update_customer_info",
   description:
-    "Record customer details found in the customer's latest message. Include only fields the customer actually provided.",
+    "Record values the customer stated in their latest message. Include only what they actually said.",
   input_schema: {
     type: "object",
     properties: {
       name: { type: "string" },
       phone: { type: "string" },
       email: { type: "string" },
-      purpose: {
-        type: "string",
-        enum: ["emi_query", "payment_plan", "new_loan", "talk_to_agent", "other"],
-      },
+      purpose: { type: "string", enum: PURPOSES },
       details: {
         type: "object",
         description: "Branch-specific answers with snake_case keys",
@@ -37,6 +52,7 @@ const extractTool: Anthropic.Tool = {
       details_complete: { type: "boolean" },
       date: { type: "string", description: "YYYY-MM-DD" },
       time: { type: "string", description: "HH:MM, 24-hour" },
+      confirmation: { type: "string", enum: ["yes", "no"] },
     },
   },
 };
@@ -53,7 +69,7 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     const messages: Msg[] = Array.isArray(body.messages) ? body.messages : [];
-    const prevState: BotState = body.state ?? emptyState();
+    const prevState: BotState = { ...emptyState(), ...(body.state ?? {}) };
 
     // The API needs the first message to come from the user; the greeting is ours.
     const apiMessages: Msg[] =
@@ -66,7 +82,8 @@ export async function POST(req: Request) {
     // 1) Extract: Claude turns free text into structured fields.
     const extraction = await client.messages.create({
       model: MODEL,
-      max_tokens: 500,
+      max_tokens: 1024,
+      ...NO_THINKING,
       system: extractSystem(now, prevState),
       tools: [extractTool],
       tool_choice: { type: "tool", name: "update_customer_info" },
@@ -77,27 +94,34 @@ export async function POST(req: Request) {
     );
     const extracted = (toolUse?.input ?? {}) as Extracted;
 
-    // 2) Validate in code, merge into state.
-    const { state, errors } = mergeExtracted(prevState, extracted);
-    const missing = missingFields(state);
-    const done = missing.length === 0;
+    // 2) Validate in code and merge into state.
+    const { state, errors, notes } = mergeExtracted(prevState, extracted);
 
-    // 3) Reply: Claude phrases the next turn naturally.
-    const replyRes = await client.messages.create({
-      model: MODEL,
-      max_tokens: 300,
-      system: replySystem(now, state, errors, missing, done),
-      messages: apiMessages,
-    });
-    const reply =
-      textOf(replyRes) || "Sorry, could you please repeat that?";
+    // 3) Check the slot against the real calendar.
+    if (state.date && state.time && !state.booking) {
+      if (!(await isSlotFree(state.date, state.time))) {
+        const alt = nearest(await freeSlots(state.date), state.time);
+        errors.push(
+          `${prettyTime(state.time)} on that date is already booked. ${
+            alt.length ? `Offer these free slots: ${speakSlots(alt)}.` : "That day is full; ask for another date."
+          }`,
+        );
+        state.lastAttempt.time = state.time;
+        state.time = undefined;
+        if (!alt.length) state.date = undefined;
+      }
+    }
 
-    // 4) Handover note for the human agent once everything is collected.
+    const steps = nextSteps(state);
+    const done = steps.length === 0;
+
+    // 4) When complete: handover note + calendar booking.
     let summary = "";
-    if (done) {
+    if (done && !state.booking) {
       const s = await client.messages.create({
         model: MODEL,
-        max_tokens: 200,
+        max_tokens: 400,
+        ...NO_THINKING,
         system: SUMMARY_SYSTEM,
         messages: [
           {
@@ -109,6 +133,58 @@ export async function POST(req: Request) {
         ],
       });
       summary = textOf(s);
+
+      if (calendarConfigured()) {
+        try {
+          const ev = await createCallbackEvent({
+            name: state.name!,
+            phone: state.phone!,
+            email: state.email!,
+            purposeLabel: PURPOSE_LABEL[state.purpose!],
+            details: Object.entries(state.details)
+              .map(([k, v]) => `${k.replace(/_/g, " ")}: ${v}`)
+              .join("; "),
+            summary,
+            date: state.date!,
+            time: state.time!,
+          });
+          state.booking = { status: "booked", ...ev };
+        } catch (e) {
+          console.error("Calendar booking failed", e);
+          state.booking = { status: "calendar_error" };
+        }
+      } else {
+        state.booking = { status: "calendar_unavailable" };
+      }
+    }
+
+    // 5) Reply: Claude phrases the next turn naturally.
+    const replyRes = await client.messages.create({
+      model: MODEL,
+      max_tokens: 1024,
+      ...NO_THINKING,
+      system: replySystem(
+        now,
+        state,
+        errors,
+        notes,
+        steps.map((s) => describeStep(s, state)),
+        done,
+      ),
+      messages: apiMessages,
+    });
+    let reply = textOf(replyRes);
+    if (replyRes.stop_reason !== "end_turn") {
+      console.warn("Reply stop_reason:", replyRes.stop_reason);
+    }
+
+    // Guard rails: never return an empty or dead-end reply.
+    if (!done) {
+      const q = fallbackQuestion(steps[0], state);
+      if (!reply || replyRes.stop_reason === "max_tokens") reply = q;
+      else if (!reply.includes("?")) reply = `${reply} ${q}`;
+    } else if (!reply) {
+      reply = "Your callback is booked. You can see the confirmation on screen. Thank you for calling FinServe Finance!";
     }
 
     return NextResponse.json({ reply, state, done, summary, errors });
