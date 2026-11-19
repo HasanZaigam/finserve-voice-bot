@@ -100,7 +100,16 @@ export async function POST(req: Request) {
       const t = last.toLowerCase().trim();
       const negative = /\b(no|nope|nah|wrong|incorrect|not correct|not right|galat|nahi|nahin)\b/.test(t);
       const positive = /\b(yes|yeah|yep|yup|correct|right|exactly|perfect|sure|ok|okay|confirm(ed)?|haan|han|ha|ji|theek|sahi)\b/.test(t);
-      const newContact = prevState.pending.some((p) => extracted[p.field]);
+      const digits = (x: string) => x.toLowerCase().replace(/[^a-z0-9@.]/g, "");
+      const newContact = prevState.pending.some((p) => {
+        const v = extracted[p.field];
+        if (!v) return false;
+        const same =
+          p.field === "phone"
+            ? v.replace(/\D/g, "").endsWith(p.value)
+            : digits(v) === p.value;
+        return !same;
+      });
       const movedOn = Boolean(extracted.purpose || extracted.details || extracted.date || extracted.time);
       if (negative && !newContact) extracted.confirmation = "no";
       else if (positive || (movedOn && !newContact)) extracted.confirmation = "yes";

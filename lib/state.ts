@@ -184,7 +184,8 @@ export function validateField(f: Field, raw: string): { ok: true; value: string 
 
 /* ---------------- merge ---------------- */
 
-export function mergeExtracted(prev: BotState, ex: Extracted) {
+export function mergeExtracted(prev: BotState, exIn: Extracted) {
+  const ex: Extracted = { ...exIn };
   const s: BotState = {
     ...prev,
     details: { ...prev.details },
@@ -194,6 +195,17 @@ export function mergeExtracted(prev: BotState, ex: Extracted) {
   };
   const errors: string[] = [];
   const notes: string[] = [];
+
+  // 0) The model often repeats values it just heard in the read-back. A value
+  //    identical to one already pending or confirmed is not a new answer.
+  for (const f of ["phone", "email"] as const) {
+    const raw = ex[f];
+    if (!raw) continue;
+    const r = validateField(f, raw);
+    if (r.ok && (r.value === s[f] || s.pending.some((p) => p.field === f && p.value === r.value))) {
+      delete ex[f];
+    }
+  }
 
   // 1) Resolve an open read-back first.
   if (s.pending.length && ex.confirmation) {

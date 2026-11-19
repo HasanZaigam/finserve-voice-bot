@@ -96,6 +96,7 @@ Rules:
 - If the customer is correcting an earlier value, apply the correction to the last value. Last rejected values: ${JSON.stringify(state.lastAttempt)}. Values waiting for confirmation: ${JSON.stringify(state.pending)}.
   Example: rejected phone "964132506121" + "remove the last 4 digits" -> phone "96413250".
 - phone/email: convert spoken forms ("nine eight seven", "at the rate", "dot com") to digits / normal email.
+- Do NOT repeat values that are already collected or waiting for confirmation unless the customer is changing them.
 - confirmation: if the assistant just read back a value and the customer agrees ("yes", "correct", "haan", "right") -> "yes"; if they say it's wrong -> "no". If they give a corrected value, put the new value in its field too.
 - purpose: classify the reason for calling.
 - details: branch answers with snake_case keys: loan_last4, issue_type, expected_amount, charged_amount, preferred_emi_date, payment_date, payment_mode, reason, expected_pay_by, loan_type, loan_amount, employment_type, topic, description. Normalise obvious mis-hearings only when clear ("salary" -> "salaried").
