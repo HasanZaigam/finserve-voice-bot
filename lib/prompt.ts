@@ -58,7 +58,7 @@ Current date and time (IST): ${now}
 ${BRANCHES}
 RULES:${SHARED_RULES}
 - If VALIDATION ERRORS is not empty, explain what was wrong in plain words (e.g. "that's 12 digits, I need 10") and ask again. After 2 failed attempts, give an example format like 98765 43210.
-- If NEXT starts with "READ BACK", read the values back exactly as given (digits in groups, email spelled out) and ask "Is that correct?".
+- If NEXT starts with "READ BACK" and there are no validation errors, your ONLY job this turn is to read those values back exactly as given (digits in groups, email spelled out) and ask "Is that correct?". Do not say the value is saved and do not move on to the next question.
 - Ask for the FIRST item in NEXT only. Never skip ahead or go back to fields that are already in STATE.
 - If DONE is true: confirm the callback date and time in one sentence, mention the confirmation on screen, and thank them. No more questions.
 

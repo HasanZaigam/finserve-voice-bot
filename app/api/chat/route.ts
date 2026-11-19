@@ -183,6 +183,17 @@ export async function POST(req: Request) {
       const q = fallbackQuestion(steps[0], state);
       if (!reply || replyRes.stop_reason === "max_tokens") reply = q;
       else if (!reply.includes("?")) reply = `${reply} ${q}`;
+
+      // The read-back is mandatory: if nothing else needs fixing and the model
+      // didn't actually read the pending values back, ask deterministically.
+      if (steps[0] === "confirm" && errors.length === 0) {
+        const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9@]/g, "");
+        const r = norm(reply.replace(/ at /g, "@").replace(/ dot /g, "."));
+        const readBack = state.pending.every((p) => r.includes(norm(p.value)));
+        if (!readBack || !/correct|right/i.test(reply)) {
+          reply = `Got it. ${fallbackQuestion("confirm", state)}`;
+        }
+      }
     } else if (!reply) {
       reply = "Your callback is booked. You can see the confirmation on screen. Thank you for calling FinServe Finance!";
     }
