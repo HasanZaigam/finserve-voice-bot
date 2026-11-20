@@ -5,6 +5,33 @@ import { nowISTLabel, PURPOSES } from "../../../../lib/state";
 export const dynamic = "force-dynamic";
 
 /**
+ * Voice is configurable from env, so you can try voices from the Vapi voice
+ * library without code changes:
+ *   VAPI_VOICE_PROVIDER = vapi | 11labs | cartesia
+ *   VAPI_VOICE_ID       = voice name (vapi) or voice id (11labs / cartesia)
+ *   VAPI_VOICE_MODEL    = optional model override
+ */
+function buildVoice() {
+  const provider = process.env.VAPI_VOICE_PROVIDER || "vapi";
+  const voiceId = process.env.VAPI_VOICE_ID;
+  if (provider === "11labs" && voiceId) {
+    return {
+      provider: "11labs",
+      voiceId,
+      model: process.env.VAPI_VOICE_MODEL || "eleven_flash_v2_5",
+      stability: 0.45,
+      similarityBoost: 0.8,
+      style: 0.2,
+      useSpeakerBoost: true,
+    };
+  }
+  if (provider === "cartesia" && voiceId) {
+    return { provider: "cartesia", voiceId, model: process.env.VAPI_VOICE_MODEL || "sonic-3" };
+  }
+  return { provider: "vapi", voiceId: voiceId || "Rohan", speed: 1.0 };
+}
+
+/**
  * Returns a transient Vapi assistant. The browser starts the call with it, so
  * the prompt, voice and tools live in this repo instead of the Vapi dashboard.
  */
@@ -96,12 +123,14 @@ export async function GET(req: Request) {
         { type: "endCall" },
       ],
     },
-    voice: {
-      provider: process.env.VAPI_VOICE_PROVIDER || "vapi",
-      voiceId: process.env.VAPI_VOICE_ID || "Rohan",
-    },
+    voice: buildVoice(),
     transcriber: { provider: "deepgram", model: "nova-3", language: "en" },
-    backgroundSound: "office",
+    // Clean line by default; set VAPI_BACKGROUND=office for call-centre ambience.
+    backgroundSound: process.env.VAPI_BACKGROUND || "off",
+    // Natural turn-taking: wait for the caller to really finish, and don't stop
+    // talking on a cough or a one-word "hmm".
+    startSpeakingPlan: { waitSeconds: 0.4, smartEndpointingPlan: { provider: "livekit" } },
+    stopSpeakingPlan: { numWords: 2, voiceSeconds: 0.3, backoffSeconds: 1 },
     silenceTimeoutSeconds: 30,
     maxDurationSeconds: 600,
     endCallMessage: `Thank you for calling ${BRAND}. Have a great day!`,

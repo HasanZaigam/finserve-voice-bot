@@ -4,7 +4,7 @@ An AI customer-care agent for a fictional lender, **FinServe Finance**. A custom
 
 The use case mirrors AI-answered inbound calls in loan servicing and collections, with a human in the loop.
 
-**Live demo:** <add Vercel link>  ·  **Screen recording:** <add Loom link>
+**Live demo:** https://finserve-voice-bot.vercel.app  ·  **Screen recording:** https://www.loom.com/share/8a475db84919411593baec8271be7290
 
 ---
 
@@ -47,7 +47,7 @@ Browser ── Vapi Web SDK ── Vapi (Deepgram STT → Claude → voice)
 - **Corrections:** the last rejected value is remembered, so "remove the last 4 digits" works.
 
 ## Tech stack
-Next.js 15 (App Router, TypeScript) · Anthropic Claude API · Vapi Web SDK (Deepgram nova-3, Vapi "Rohan" voice) · Google Calendar API (service account) · Vercel. Built with Claude as the AI coding tool.
+Next.js 15 (App Router, TypeScript) · Anthropic Claude API · Vapi Web SDK (Deepgram nova-3, LiveKit smart endpointing, configurable Vapi / ElevenLabs / Cartesia voice) · Google Calendar API (service account) · Vercel. Built with Claude as the AI coding tool.
 
 ## Setup
 ```bash
